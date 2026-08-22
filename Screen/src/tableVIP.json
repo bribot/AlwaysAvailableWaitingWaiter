@@ -1,0 +1,23 @@
+[
+  {
+    "itemName": "Hamburger",
+    "details": "-onions",
+    "price": 9.99,
+    "time": "15 min",
+    "delivered": true
+  },
+  {
+    "itemName": "Cheeseburger",
+    "details": "-tomatoes",
+    "price": 10.99,
+    "time": "20 min",
+    "delivered": false
+  },
+  {
+    "itemName": "Veggie Burger",
+    "details": "-lettuce",
+    "price": 8.99,
+    "time": "10 min",
+    "delivered": true
+  }
+]

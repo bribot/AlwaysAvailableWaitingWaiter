@@ -73,11 +73,11 @@ inline Rect_t getItemDetailRect(const Rect_t& item) {
 }
 
 inline Rect_t getItemPriceRect(const Rect_t& item) {
-    return Rect_t{ item.x + item.width*3/4, item.y, item.width/3, item.height };
+    return Rect_t{ item.x + item.width*3/4, item.y, item.width/4, item.height };
 }
 
 inline Rect_t getItemTimeRect(const Rect_t& item) {
-    return Rect_t{ item.x + item.width*2/4, item.y, item.width/3, item.height };
+    return Rect_t{ item.x + item.width*2/4, item.y, item.width/7, item.height/2 };
 }
 
 inline Rect_t getItemCheckBoxRect(int row, int32_t itemHeight) {
