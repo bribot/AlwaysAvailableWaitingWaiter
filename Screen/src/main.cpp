@@ -19,7 +19,7 @@ JsonDocument doc;
 #define NormalMode 1
 #define WaiterMode 2
 
-#define NormalModeDelay 30000
+#define NormalModeDelay 10000
 #define WaiterModeDelay 1000
 #define SleepModeDelay 300000
 
@@ -49,6 +49,7 @@ String TotalAmount = "$0.00";
 RTC_DATA_ATTR bool mainDrawn = false;
 RTC_DATA_ATTR uint8_t TableNumber = 0;
 RTC_DATA_ATTR uint8_t OrderID = 0;
+RTC_DATA_ATTR bool splashDrawn = false;
 bool itemsDrawn = false; 
 
 void drawPartialString(const char* text, Rect_t rect, uint8_t fontsize = defaultFontSize);
@@ -124,12 +125,11 @@ void setup()
     }
 
     if (mode == WaiterMode) {
+        itemsDrawn = false;
         while (checkPending()) {
             waiterMode();
         }
-        //mainDrawn = false;
-        itemsDrawn = false;
-        normalMode();
+        mainDrawn = false;
     } else if (mode == NormalMode) {
         normalMode();
     } 
@@ -160,7 +160,10 @@ void waiterMode() {
     delay(WaiterModeDelay);
 }
 void sleepMode() {
-    drawSplashScreen();
+    if (!splashDrawn) {
+        drawSplashScreen();
+    }
+    splashDrawn = true;
     mainDrawn = false;
     goToSleep(SleepModeDelay);
 }
@@ -210,19 +213,23 @@ void drawSplashScreen() {
 }
 
 void drawWaiterModeScreen() {
+
     if (!itemsDrawn) {
-        
+        epaper.fillScreen(TFT_WHITE);
+        epaper.update();
+        startupScreen();
+        epaper.update();
         Rect_t titleRect = getItemRect(1);
         Rect_t tableRect = getItemRect(0);
-        epaper.fillRect(tableRect.x, tableRect.y, tableRect.width, EPD_HEIGHT-tableRect.y, TFT_WHITE);
-        epaper.fillRect(titleRect.x, titleRect.y-5, titleRect.width, titleRect.height+10, TFT_BLACK);
+        //epaper.fillRect(tableRect.x, tableRect.y, tableRect.width, EPD_HEIGHT-tableRect.y, TFT_WHITE);
+        epaper.fillRect(0, titleRect.y-8, titleRect.width, titleRect.height+4, TFT_BLACK);
         epaper.update();
         drawPartialString("Is this correct?", titleRect, 5);
         itemsDrawn = true;
     }
 
     if(fetchPendingOrders(jsonResponse, TableNumber)) {
-        row = 2;
+        uint8_t row = 2;
         DeserializationError error = deserializeJson(doc, jsonResponse);
         if (!error) {
             JsonArray items = doc.as<JsonArray>();
