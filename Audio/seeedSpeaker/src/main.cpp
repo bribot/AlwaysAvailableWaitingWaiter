@@ -25,22 +25,32 @@
 #include <ArduinoWebsockets.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <Wire.h>
+#include <Adafruit_PN532.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_LEDBackpack.h>
 
 #include "AudioTools.h"
 #include "board_pins.h"
 #include "secrets.h"
+#include "eye_emotes.h"
 
 using namespace websockets;
 
 // ------------------------------- config -------------------------------------
+
+
+#define LED_MATRIX_LEFT 0x70
+#define LED_MATRIX_RIGHT 0x71
+
 static const char *WIFI_SSID_ = WIFI_SSID;
 static const char *WIFI_PASS_ = WIFI_PASSWORD;
-static const char *HOST = HOST_ADDR;
+String serverURL = SERVER_URL;
 static const uint16_t PORT = PORT_NUM;
-static const char *DEVICE_NAME = DEVICE_ID;
+static uint8_t deviceNumber = DEVICE_NUMBER;
 
-// Resolved from GET /device/{DEVICE_NUMBER} - -1 means "not yet known".
-static int TABLE_NUMBER = -1;
+// Resolved from GET /device/{DEVICE_NUMBER}".
+static int TABLE_NUMBER = 0;
 
 static const int BUTTON_PIN = D3;      // push-to-talk, active LOW
 static const uint32_t SAMPLE_RATE = 16000;
@@ -66,6 +76,33 @@ static bool lastButtonDown = false;
 static uint32_t lastButtonChange = 0;
 static uint32_t captureStartedAt = 0;
 static uint32_t lastReconnectAttempt = 0;
+static uint16_t nfcMisses = 0;
+static const uint16_t NFC_MISS_RESET_THRESHOLD = 10;
+
+// Set from an ISR so a button edge is never missed or timestamped late just
+// because loop() happens to be stuck inside a slow/stalled I2C call (NFC
+// polling, LED matrix writes) when the physical press/release occurs.
+volatile bool buttonIsrPending = false;
+volatile bool buttonIsrState = false;
+volatile uint32_t buttonIsrTime = 0;
+
+// Diagnostics: is the button itself flaky (raw ISR-measured hold is short),
+// or is real audio being dropped somewhere between a genuinely long hold and
+// what the server receives (pump call/byte counts vs. that same hold time)?
+static uint32_t pressIsrTime = 0;
+static uint32_t pumpCallCount = 0;
+static uint32_t pumpBytesSent = 0;
+
+Adafruit_PN532 nfc(-1, -1, &Wire);
+Adafruit_8x8matrix eyeLeft = Adafruit_8x8matrix();
+Adafruit_8x8matrix eyeRight = Adafruit_8x8matrix();
+
+uint8_t uid[7];
+uint8_t uidLength;
+
+const uint8_t table1_uid[] = {0x04,0xAF, 0xD3, 0xAA, 0x8B, 0x26 ,0x81};
+const uint8_t table2_uid[] = {0x04, 0x33, 0xCA, 0xAA, 0x8B, 0x26, 0x81};
+const uint8_t table3_uid[] = {0x04, 0x42, 0x11, 0xAB, 0x8B, 0x26, 0x81};
 
 // ------------------------------ prototypes ----------------------------------
 void connectWiFi();
@@ -78,13 +115,114 @@ void stopCapture();
 void cancelCapture();
 void pumpAudio();
 void setStatus(uint8_t r, uint8_t g, uint8_t b);
+void initNFC();
+void initMatrix(Adafruit_8x8matrix &m, uint8_t addr);
+void showEyeEmote(Adafruit_8x8matrix &m, const uint8_t *emote);
+void nfcTagRecon();
+void changeTableNumber(uint8_t newTableNumber);
+void IRAM_ATTR handleButtonInterrupt();
+
+void scanI2CBus() {
+  Serial.println("Scanning I2C bus...");
+  uint8_t found = 0;
+  for (uint8_t addr = 1; addr < 127; addr++) {
+    Wire.beginTransmission(addr);
+    if (Wire.endTransmission() == 0) {
+      Serial.printf("  device found at 0x%02X\n", addr);
+      found++;
+    }
+  }
+  if (found == 0) {
+    Serial.println("  no I2C devices found - check wiring/power");
+  }
+}
+
+void showEyeEmote(Adafruit_8x8matrix &m, const uint8_t *emote){
+    m.clear();
+    m.drawBitmap(0,0,emote,8,8,LED_ON);
+    m.writeDisplay();
+}
+
+void setEyes(const uint8_t *emote){
+    showEyeEmote(eyeLeft,emote);
+    showEyeEmote(eyeRight,emote);
+}
+
+
+void blinkAnimation(){
+    setEyes(idle_eye);
+    delay(100);
+    setEyes(closed_eye);
+    delay(100);
+    setEyes(idle_eye);
+}
+
+void happyAnimation(){
+    for(int i=0; i<3;i++){
+    setEyes(happy1);
+    delay(100);
+    setEyes(happy2);
+    delay(100);
+}
+}
+
+void sideEyeAnimation(){
+    setEyes(leftidle_eye);
+    delay(100);
+    setEyes(rightidle_eye);
+    delay(100);
+    setEyes(idle_eye);
+}
+
+void changeTableAnimation(uint8_t table){
+    switch (table)
+    {
+    case 1:
+        setEyes(tag1);
+        break;
+    case 2:
+        setEyes(tag2);
+        break;
+    case 3:
+        setEyes(tag3);
+        break;
+    
+    default:
+        break;
+    }
+    delay(1000);
+    happyAnimation();
+    sideEyeAnimation();
+}
+
 
 // -------------------------------- setup -------------------------------------
 void setup() {
     Serial.begin(115200);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonInterrupt, CHANGE);
 
-    delay(3000);
+    Wire.begin();
+
+    delay(3000); // delay so i can connect to the serial, remove!
+    scanI2CBus();
+    initNFC();
+    initMatrix(eyeLeft, LED_MATRIX_LEFT);
+    initMatrix(eyeRight, LED_MATRIX_RIGHT);
+
+    setEyes(question_eye);
+    delay(2000);
+    setEyes(happy_face);
+    delay(2000);
+    setEyes(sad_eye);
+    delay(2000);
+    setEyes(error);
+    delay(2000);
+
+    happyAnimation();
+    blinkAnimation();
+
+    setEyes(idle_eye);
 
     setStatus(40, 0, 0);  // red until we're online
     connectWiFi();
@@ -134,20 +272,34 @@ void loop() {
 
     ws.poll();
 
-    // ---- debounced push-to-talk ----
-    bool buttonDown = digitalRead(BUTTON_PIN) == LOW;
-    //Serial.printf("[mic] button %s\n", buttonDown ? "down" : "up");
-    if (buttonDown != lastButtonDown && millis() - lastButtonChange > DEBOUNCE_MS) {
-        lastButtonChange = millis();
-        lastButtonDown = buttonDown;
-        if (buttonDown) {
-            startCapture();
-        } else {
-            stopCapture();
+    // ---- debounced push-to-talk (edge captured by ISR, not polling) --------
+    if (buttonIsrPending) {
+        noInterrupts();
+        bool newState = buttonIsrState;
+        uint32_t changeTime = buttonIsrTime;
+        buttonIsrPending = false;
+        interrupts();
+
+        if (newState != lastButtonDown && changeTime - lastButtonChange > DEBOUNCE_MS) {
+            lastButtonChange = changeTime;
+            lastButtonDown = newState;
+            if (newState) {
+                pressIsrTime = changeTime;
+                startCapture();
+                setEyes(attention_eye);
+            } else {
+                Serial.printf("[diag] ISR-measured hold: %lu ms (press t=%lu, release t=%lu)\n",
+                              changeTime - pressIsrTime, pressIsrTime, changeTime);
+                stopCapture();
+                Serial.printf("[diag] pumpAudio calls=%lu, bytes sent=%lu (~%.2fs of audio)\n",
+                              pumpCallCount, pumpBytesSent,
+                              pumpBytesSent / (float)(SAMPLE_RATE * sizeof(int16_t)));
+            }
         }
     }
 
     if (capturing) {
+        //Serial.printf("Capturing...");
         pumpAudio();
         // Don't let a stuck button stream forever.
         if (millis() - captureStartedAt > MAX_UTTERANCE_MS) {
@@ -157,7 +309,85 @@ void loop() {
     } else {
         // Keep draining I2S so the DMA buffers don't overflow with stale audio.
         i2sIn.readBytes((uint8_t *)i2sBuffer, I2S_CHUNK_BYTES);
+
+        bool tagPresent = 0;//nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 100);
+
+        if (tagPresent){
+            nfcMisses = 0;
+            nfcTagRecon();
+        } else if (++nfcMisses > NFC_MISS_RESET_THRESHOLD) {
+            // Known arduino-esp32 I2C-NG driver bug: an I2C NACK (which the PN532
+            // sends routinely while polled without an IRQ pin) can wedge the bus
+            // into ESP_ERR_INVALID_STATE permanently. Reset the driver to recover.
+            // https://github.com/espressif/arduino-esp32/issues/11374
+            nfcMisses = 0;
+            Wire.end();
+            Wire.begin();
+        }
     }
+}
+
+void initNFC(){
+    nfc.begin();
+    uint32_t version = nfc.getFirmwareVersion();
+    if (!version) {
+        Serial.println("PN532 not found!!");
+        while (true) {
+            delay(1000);
+        }
+    }
+    nfc.SAMConfig();
+}
+
+void initMatrix(Adafruit_8x8matrix &m, uint8_t addr){
+    if (!m.begin(addr, &Wire)){
+        Serial.printf("Matrix %02X not found",addr);
+        return;
+    } 
+    m.setBrightness(8);
+    m.clear();
+    m.writeDisplay();
+}
+
+
+void nfcTagRecon(){
+    // Serial.print("Tag UID:");
+    // for (uint8_t i = 0; i < uidLength; i++) {
+    //   Serial.printf(" %02X", uid[i]);
+    // }
+    // Serial.println();
+    // if (uidLength == sizeof(table1_uid) && memcmp(uid, table1_uid, uidLength) == 0){
+    //   showEyeEmote(eyeLeft, tag_found_bmp);
+    //   showEyeEmote(eyeRight, tag_found_bmp);
+    // }
+    uint8_t newtable = 0;
+    if (uidLength == sizeof(table1_uid)){
+        
+            if (uid[1] == table1_uid[1]){
+                newtable = 1;
+            } else if (uid[1] == table2_uid[1]){
+                newtable = 2;
+            } else if (uid[1] == table3_uid[1])
+            {
+                newtable = 3;
+            }
+            if(newtable != 0 && newtable != TABLE_NUMBER){
+                changeTableNumber(newtable);
+                changeTableAnimation(newtable);
+        }
+        
+    }
+}
+
+void changeTableNumber(uint8_t newTableNumber) {
+    Serial.printf("Table changed to %d",newTableNumber);
+    HTTPClient http;
+    String url = serverURL + ":" + String(PORT) + "/device/" + String(deviceNumber);
+    http.begin(url);
+    http.addHeader("Content-Type", "application/json");
+    http.PUT("{\"table_number\":" + String(newTableNumber) + "}");
+    http.end();
+    TABLE_NUMBER = newTableNumber;
 }
 
 // ------------------------------ networking ----------------------------------
@@ -176,7 +406,7 @@ void connectWiFi() {
 
 bool fetchAssignedTable(int &tableNumberOut) {
     HTTPClient http;
-    String url = String("http://") + HOST + ":" + String(PORT) + "/device/" + String(DEVICE_NUMBER);
+    String url = serverURL + ":" + String(PORT) + "/device/" + String(DEVICE_NUMBER);
     http.begin(url);
     int httpCode = http.GET();
 
@@ -200,6 +430,7 @@ bool fetchAssignedTable(int &tableNumberOut) {
 bool connectSocket() {
     // Re-check on every (re)connect attempt, not just at boot, so a table
     // reassignment (PUT /device/{n} elsewhere) is picked up without a reflash.
+    ws.close();
     int fetched;
     if (fetchAssignedTable(fetched)) {
         if (fetched != TABLE_NUMBER) {
@@ -210,13 +441,18 @@ bool connectSocket() {
         Serial.println("[device] lookup failed, using last known table");
     }
 
+    // serverURL includes the "http://" scheme (needed for HTTPClient calls
+    // elsewhere); strip it here since we're building a ws:// URL instead.
+    String host = serverURL;
+    host.replace("http://", "");
+
     char url[160];
 #ifdef API_KEY_STR
-    snprintf(url, sizeof(url), "ws://%s:%u/table/%d/voice?device=%s&api_key=%s", HOST,
+    snprintf(url, sizeof(url), "ws://%s:%u/table/%d/voice?device=%s&api_key=%s", host.c_str(),
              PORT, TABLE_NUMBER, DEVICE_NAME, API_KEY_STR);
 #else
-    snprintf(url, sizeof(url), "ws://%s:%u/table/%d/voice?device=%s", HOST, PORT,
-             TABLE_NUMBER, DEVICE_NAME);
+    snprintf(url, sizeof(url), "ws://%s:%u/table/%d/voice?device=%u", host.c_str(), PORT,
+             TABLE_NUMBER, deviceNumber);
 #endif
 
     Serial.printf("[ws] connecting to %s\n", url);
@@ -262,6 +498,7 @@ void onWsMessage(WebsocketsMessage message) {
 
     } else if (!strcmp(type, "processing")) {
         setStatus(30, 20, 0);  // amber: waiting on Gemini
+        setEyes(wait_eye);
         Serial.printf("[ws] processing %.2fs of audio\n", (float)(doc["seconds"] | 0.0));
 
     } else if (!strcmp(type, "result")) {
@@ -280,19 +517,37 @@ void onWsMessage(WebsocketsMessage message) {
                           (int)(doc["matched_count"] | 0), (int)(doc["unmatched_count"] | 0));
         }
         setStatus(0, 30, 0);
+        happyAnimation();
+        setEyes(idle_eye);
 
     } else if (!strcmp(type, "error")) {
         Serial.printf("[ws] error: %s\n", doc["message"] | "");
         setStatus(60, 0, 0);
         delay(400);
         setStatus(0, 30, 0);
+        setEyes(error);
+        delay(1000);
+        sideEyeAnimation();
 
     } else if (!strcmp(type, "cancelled")) {
         setStatus(0, 30, 0);
+        setEyes(sad_eye);
+        delay(1000);
+        sideEyeAnimation();
     }
 }
 
 // -------------------------------- capture -----------------------------------
+// Minimal and non-blocking, as an ISR must be: just latch the new state and
+// the exact time it happened. All the real work (debounce, startCapture,
+// stopCapture, any I2C/Serial/WS calls) stays in loop(), which is not
+// interrupt-safe to call from here.
+void IRAM_ATTR handleButtonInterrupt() {
+    buttonIsrState = (digitalRead(BUTTON_PIN) == LOW);
+    buttonIsrTime = millis();
+    buttonIsrPending = true;
+}
+
 void startCapture() {
     if (!wsConnected) return;
     Serial.println("[mic] start");
@@ -305,6 +560,8 @@ void startCapture() {
 
     capturing = true;
     captureStartedAt = millis();
+    pumpCallCount = 0;
+    pumpBytesSent = 0;
     ws.send("{\"type\":\"start\"}");
 }
 
@@ -313,6 +570,7 @@ void stopCapture() {
     capturing = false;
     Serial.println("[mic] stop");
     ws.send("{\"type\":\"stop\"}");
+    setEyes(wait_eye);
 }
 
 void cancelCapture() {
@@ -322,6 +580,7 @@ void cancelCapture() {
 }
 
 void pumpAudio() {
+    pumpCallCount++;
     size_t bytesRead = i2sIn.readBytes((uint8_t *)i2sBuffer, I2S_CHUNK_BYTES);
     if (bytesRead < sizeof(int32_t) * 2) return;
 
@@ -336,7 +595,9 @@ void pumpAudio() {
         Serial.println("[ws] send failed, dropping utterance");
         capturing = false;
         wsConnected = false;
+        return;
     }
+    pumpBytesSent += frames * sizeof(int16_t);
 }
 
 // -------------------------------- status LED --------------------------------

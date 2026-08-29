@@ -4,7 +4,7 @@
 #include "secrets.h"
 #include "ArduinoJson.h"
 #include "HTTPClient.h"
-#include "magic_circle.h"
+#include "restaurant.h"
 
 #ifdef EPAPER_ENABLE // Only compile this code if the EPAPER_ENABLE is defined in User_Setup.h
 EPaper epaper;
@@ -19,9 +19,9 @@ JsonDocument doc;
 #define NormalMode 1
 #define WaiterMode 2
 
-#define NormalModeDelay 10000
+#define NormalModeDelay 3000
 #define WaiterModeDelay 1000
-#define SleepModeDelay 300000
+#define SleepModeDelay 10000
 
 
 const char* ssid     = WIFI_SSID;
@@ -197,16 +197,16 @@ void drawSplashScreen() {
     epaper.fillScreen(TFT_WHITE);
     epaper.drawRect(0, 0, EPD_WIDTH, EPD_HEIGHT, TFT_BLACK);
 
-    int16_t logoX = (EPD_WIDTH - MAGIC_CIRCLE_WIDTH) / 2;
+    int16_t logoX = (EPD_WIDTH - RESTAURANT_LOGO_WIDTH) / 2;
     int16_t logoY = 50;
-    epaper.drawXBitmap(logoX, logoY, magic_circle_bits, MAGIC_CIRCLE_WIDTH, MAGIC_CIRCLE_HEIGHT, TFT_BLACK);
+    epaper.drawXBitmap(logoX, logoY, restaurant_logo_bits, RESTAURANT_LOGO_WIDTH, RESTAURANT_LOGO_HEIGHT, TFT_BLACK);
 
     epaper.setTextColor(TFT_BLACK);
     epaper.setTextSize(4);
-    epaper.setCursor(20, logoY + MAGIC_CIRCLE_HEIGHT + 30);
+    epaper.setCursor(20, logoY + RESTAURANT_LOGO_HEIGHT + 30);
     epaper.print("Automatic Waiter");
     epaper.setTextSize(3);
-    epaper.setCursor(20, logoY + MAGIC_CIRCLE_HEIGHT + 75);
+    epaper.setCursor(20, logoY + RESTAURANT_LOGO_HEIGHT + 75);
     epaper.print("Device #: ");
     epaper.print(deviceNumber);
     epaper.update();
