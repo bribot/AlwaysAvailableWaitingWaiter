@@ -1,4 +1,4 @@
-# AlwaysAvailableWaitingWaiter 🛎️
+# AlwaysAvailableWaitingWaiter
 
 Built as an entry for a Seeed Studio contest, this is a little table-side gadget that lets restaurant guests order **by voice**, tracks what's coming and when, and shows it all on an e-paper display. Tap it onto a table with an NFC tag, press the button, say what you want, and it takes it from there.
 
@@ -41,9 +41,6 @@ Everything physical was designed from scratch and printed at home:
 
 - **[`ME/`](ME)** — the enclosure: body, bell-shaped dome, arm, bottom plate (with a battery variant), all as SolidWorks parts + STL + gcode pre-sliced.
 - **[`EE/button`](EE/button)** — a small custom KiCad PCB for the call button, gerbers included.
-
-<img src="pics%20&%20vids/earlyversion.jpg" width="500" alt="Early prototype: 3D-printed enclosure with e-paper order display and speaker dome"><br>
-<sub>How it started — before the eyes, before the paint, when it was just a screen and a dream (and a lot of hot glue).</sub>
 
 ## The brains (the short version)
 
