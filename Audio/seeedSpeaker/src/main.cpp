@@ -310,7 +310,7 @@ void loop() {
         // Keep draining I2S so the DMA buffers don't overflow with stale audio.
         i2sIn.readBytes((uint8_t *)i2sBuffer, I2S_CHUNK_BYTES);
 
-        bool tagPresent = 0;//nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 100);
+        bool tagPresent = nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 100);
 
         if (tagPresent){
             nfcMisses = 0;
@@ -321,9 +321,10 @@ void loop() {
             // into ESP_ERR_INVALID_STATE permanently. Reset the driver to recover.
             // https://github.com/espressif/arduino-esp32/issues/11374
             nfcMisses = 0;
-            Wire.end();
-            Wire.begin();
+            
         }
+        Wire.end();
+        Wire.begin();
     }
 }
 
