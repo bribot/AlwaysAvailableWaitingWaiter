@@ -42,20 +42,6 @@ Everything physical was designed from scratch and printed at home:
 - **[`ME/`](ME)** — the enclosure: body, bell-shaped dome, arm, bottom plate (with a battery variant), all as SolidWorks parts + STL + gcode pre-sliced.
 - **[`EE/button`](EE/button)** — a small custom KiCad PCB for the call button, gerbers included.
 
-## The brains (the short version)
+## How it works
 
-The devices don't do the thinking themselves — they talk over Wi-Fi to a small backend that keeps track of tables, menus, and orders, and turns a voice clip into a structured order using speech recognition plus a language model on the other end. That's it, that's all you get here; the backend has its own story to tell elsewhere. 🤫
-
-## Repo map
-
-```
-AlwaysAvailableWaitingWaiter/
-├── Audio/seeedSpeaker/   # firmware for the Waiter (mic, speaker, NFC, eyes, button)
-├── Screen/               # firmware for the e-paper table display
-├── EE/button/            # KiCad design for the call-button PCB
-├── ME/                   # enclosure design (SolidWorks, STL, sliced gcode)
-├── pics & vids/          # the good stuff
-└── Server/               # the backend — see above 😉
-```
-
----
+The devices don't do the thinking themselves — they talk over Wi-Fi to a small backend that keeps track of tables, menus, and orders, and turns a voice clip into a structured order using speech recognition plus a language model on the other end (OLLAMA+whisper).
