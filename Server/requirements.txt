@@ -1,6 +1,0 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-websockets==14.1
-python-multipart==0.0.20
-google-genai==2.17.0
-requests==2.34.2
