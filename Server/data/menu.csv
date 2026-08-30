@@ -1,0 +1,25 @@
+id,name,category,price,prep_minutes,available
+BRU01,Bruschetta,starter,7.50,8,1
+BRU02,Garlic Bread,starter,5.00,6,1
+SOU01,Tomato Soup,starter,6.25,7,1
+SAL01,Caesar Salad,salad,9.00,6,1
+SAL02,Greek Salad,salad,9.50,6,1
+BUR01,Classic Burger,main,14.00,15,1
+BUR02,Bacon Cheeseburger,main,16.50,17,1
+PAS01,Spaghetti Bolognese,main,15.00,18,1
+PAS02,Fettuccine Alfredo,main,14.50,16,1
+PIZ01,Margherita Pizza,main,13.00,14,1
+PIZ02,Pepperoni Pizza,main,15.00,14,1
+STK01,Ribeye Steak,main,28.00,25,1
+FSH01,Grilled Salmon,main,22.00,20,1
+SID01,French Fries,side,4.50,7,1
+SID02,Onion Rings,side,5.50,8,1
+SID03,Steamed Vegetables,side,5.00,6,1
+DES01,Cheesecake,dessert,8.00,3,1
+DES02,Chocolate Lava Cake,dessert,9.00,10,1
+DES03,Ice Cream,dessert,6.00,2,1
+DRK01,Soda,drink,3.00,1,1
+DRK02,Iced Tea,drink,3.50,1,1
+DRK03,House Red Wine,drink,8.00,2,1
+DRK04,Draft Beer,drink,6.50,2,1
+DRK05,Espresso,drink,3.00,3,1

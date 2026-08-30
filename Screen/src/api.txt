@@ -1,0 +1,9 @@
+Method	Path	Notes
+GET / PUT	/device/{device_number}	look up / reassign a device's table (added PUT since you wanted this DB-backed and assignable)
+GET	/table/{table_id}	current order (flat array, unchanged shape)
+GET	/table/{table_id}/pending	staged order
+POST	/table/{table_id}/confirm	merges pending onto current
+POST	/table/{table_id}/createOrder	replaces current wholesale, clears pending
+POST	/table/{table_id}/createPending	replaces pending wholesale
+GET	/table/{table_id}/{item_id}	single item detail (position-based id)
+POST	/table/{table_id}/{item_id}/delivered	toggles delivered

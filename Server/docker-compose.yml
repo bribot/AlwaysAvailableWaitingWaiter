@@ -1,0 +1,78 @@
+services:
+  api:
+    build: .
+    container_name: restaurant-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # menu.csv and restaurant.db both live here - edit the CSV on the host,
+      # then POST /menu/reload (or just wait for the next request).
+      - ./data:/data
+    environment:
+      DATA_DIR: /data
+      # API_KEY: change-me       # uncomment to require X-API-Key on every call
+      DISPLAY_ROWS: "6"
+      TZ: America/Los_Angeles
+      MAX_DEVICES: "3"
+      # Voice ordering. Without a key the API still runs; voice endpoints
+      # return an error. Put the key in Server/.env - never commit it.
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: gemini-3.6-flash
+      GEMINI_TIMEOUT: "20"
+      # Set to "local" to use the whisper+ollama services below instead of
+      # Gemini - no code change needed, just restart the container after
+      # `docker compose --profile local-ai up -d`.
+      VOICE_PROVIDER: "${VOICE_PROVIDER:-gemini}"
+      WHISPER_URL: http://whisper:9000
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:7b-instruct}"
+      # Ollama unloads an idle model after a few minutes - the reload on the
+      # next request can take longer than GEMINI_TIMEOUT, so local mode gets
+      # its own budget plus a longer keep-alive to make reloads rare.
+      LOCAL_TIMEOUT: "90"
+      OLLAMA_KEEP_ALIVE: 30m
+
+  # --- local voice pipeline (optional) -----------------------------------
+  # Off by default. Bring both up with:
+  #   docker compose --profile local-ai up -d
+  # then pull a model once:
+  #   docker exec ollama ollama pull qwen2.5:7b-instruct
+  # Needs the NVIDIA Container Toolkit on the host (already present here).
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    container_name: whisper-asr
+    restart: unless-stopped
+    profiles: ["local-ai"]
+    ports:
+      - "9000:9000"
+    environment:
+      ASR_ENGINE: faster_whisper
+      ASR_MODEL: small
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    profiles: ["local-ai"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  ollama_data:
