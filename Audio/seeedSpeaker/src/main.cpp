@@ -34,6 +34,7 @@
 #include "board_pins.h"
 #include "secrets.h"
 #include "eye_emotes.h"
+#include <Adafruit_NeoPixel.h>
 
 using namespace websockets;
 
@@ -63,6 +64,9 @@ static const size_t FRAMES_PER_CHUNK = 256;
 static const size_t I2S_CHUNK_BYTES = FRAMES_PER_CHUNK * 2 * sizeof(int32_t);
 
 // ------------------------------- globals ------------------------------------
+static Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+static bool pixelsStarted = false;
+
 I2SStream i2sIn;
 AudioInfo micInfo(SAMPLE_RATE, 2, 32);
 WebsocketsClient ws;
@@ -79,16 +83,12 @@ static uint32_t lastReconnectAttempt = 0;
 static uint16_t nfcMisses = 0;
 static const uint16_t NFC_MISS_RESET_THRESHOLD = 10;
 
-// Set from an ISR so a button edge is never missed or timestamped late just
-// because loop() happens to be stuck inside a slow/stalled I2C call (NFC
-// polling, LED matrix writes) when the physical press/release occurs.
+
 volatile bool buttonIsrPending = false;
 volatile bool buttonIsrState = false;
 volatile uint32_t buttonIsrTime = 0;
 
-// Diagnostics: is the button itself flaky (raw ISR-measured hold is short),
-// or is real audio being dropped somewhere between a genuinely long hold and
-// what the server receives (pump call/byte counts vs. that same hold time)?
+
 static uint32_t pressIsrTime = 0;
 static uint32_t pumpCallCount = 0;
 static uint32_t pumpBytesSent = 0;
@@ -120,22 +120,21 @@ void initMatrix(Adafruit_8x8matrix &m, uint8_t addr);
 void showEyeEmote(Adafruit_8x8matrix &m, const uint8_t *emote);
 void nfcTagRecon();
 void changeTableNumber(uint8_t newTableNumber);
-void IRAM_ATTR handleButtonInterrupt();
 
-void scanI2CBus() {
-  Serial.println("Scanning I2C bus...");
-  uint8_t found = 0;
-  for (uint8_t addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    if (Wire.endTransmission() == 0) {
-      Serial.printf("  device found at 0x%02X\n", addr);
-      found++;
-    }
-  }
-  if (found == 0) {
-    Serial.println("  no I2C devices found - check wiring/power");
-  }
-}
+// void scanI2CBus() {
+//   Serial.println("Scanning I2C bus...");
+//   uint8_t found = 0;
+//   for (uint8_t addr = 1; addr < 127; addr++) {
+//     Wire.beginTransmission(addr);
+//     if (Wire.endTransmission() == 0) {
+//       Serial.printf("  device found at 0x%02X\n", addr);
+//       found++;
+//     }
+//   }
+//   if (found == 0) {
+//     Serial.println("  no I2C devices found - check wiring/power");
+//   }
+// }
 
 void showEyeEmote(Adafruit_8x8matrix &m, const uint8_t *emote){
     m.clear();
@@ -200,29 +199,15 @@ void changeTableAnimation(uint8_t table){
 void setup() {
     Serial.begin(115200);
     pinMode(BUTTON_PIN, INPUT_PULLUP);
-    attachInterrupt(digitalPinToInterrupt(BUTTON_PIN), handleButtonInterrupt, CHANGE);
-
     Wire.begin();
 
-    delay(3000); // delay so i can connect to the serial, remove!
-    scanI2CBus();
+    // delay(3000); // delay so i can connect to the serial, remove!
+    //scanI2CBus();
     initNFC();
     initMatrix(eyeLeft, LED_MATRIX_LEFT);
     initMatrix(eyeRight, LED_MATRIX_RIGHT);
-
-    setEyes(question_eye);
-    delay(2000);
-    setEyes(happy_face);
-    delay(2000);
-    setEyes(sad_eye);
-    delay(2000);
-    setEyes(error);
-    delay(2000);
-
     happyAnimation();
     blinkAnimation();
-
-    setEyes(idle_eye);
 
     setStatus(40, 0, 0);  // red until we're online
     connectWiFi();
@@ -233,7 +218,6 @@ void setup() {
     }
     Serial.printf("[device] mic %d assigned to table %d\n", DEVICE_NUMBER, TABLE_NUMBER);
 
-    // The ReSpeaker Lite drives BCLK/WS, so the ESP32 is the I2S slave.
     auto cfg = i2sIn.defaultConfig(RX_MODE);
     cfg.copyFrom(micInfo);
     cfg.i2s_format = I2S_STD_FORMAT;
@@ -272,29 +256,17 @@ void loop() {
 
     ws.poll();
 
-    // ---- debounced push-to-talk (edge captured by ISR, not polling) --------
-    if (buttonIsrPending) {
-        noInterrupts();
-        bool newState = buttonIsrState;
-        uint32_t changeTime = buttonIsrTime;
-        buttonIsrPending = false;
-        interrupts();
-
-        if (newState != lastButtonDown && changeTime - lastButtonChange > DEBOUNCE_MS) {
-            lastButtonChange = changeTime;
-            lastButtonDown = newState;
-            if (newState) {
-                pressIsrTime = changeTime;
-                startCapture();
-                setEyes(attention_eye);
-            } else {
-                Serial.printf("[diag] ISR-measured hold: %lu ms (press t=%lu, release t=%lu)\n",
-                              changeTime - pressIsrTime, pressIsrTime, changeTime);
-                stopCapture();
-                Serial.printf("[diag] pumpAudio calls=%lu, bytes sent=%lu (~%.2fs of audio)\n",
-                              pumpCallCount, pumpBytesSent,
-                              pumpBytesSent / (float)(SAMPLE_RATE * sizeof(int16_t)));
-            }
+    // ---- debounced push-to-talk ----
+    bool buttonDown = digitalRead(BUTTON_PIN) == LOW;
+    //Serial.printf("[mic] button %s\n", buttonDown ? "down" : "up");
+    if (buttonDown != lastButtonDown && millis() - lastButtonChange > DEBOUNCE_MS) {
+        lastButtonChange = millis();
+        lastButtonDown = buttonDown;
+        if (buttonDown) {
+            setEyes(attention_eye);
+            startCapture();
+        } else {
+            stopCapture();
         }
     }
 
@@ -316,9 +288,7 @@ void loop() {
             nfcMisses = 0;
             nfcTagRecon();
         } else if (++nfcMisses > NFC_MISS_RESET_THRESHOLD) {
-            // Known arduino-esp32 I2C-NG driver bug: an I2C NACK (which the PN532
-            // sends routinely while polled without an IRQ pin) can wedge the bus
-            // into ESP_ERR_INVALID_STATE permanently. Reset the driver to recover.
+            // weird bug
             // https://github.com/espressif/arduino-esp32/issues/11374
             nfcMisses = 0;
             
@@ -389,6 +359,7 @@ void changeTableNumber(uint8_t newTableNumber) {
     http.PUT("{\"table_number\":" + String(newTableNumber) + "}");
     http.end();
     TABLE_NUMBER = newTableNumber;
+    connectSocket();
 }
 
 // ------------------------------ networking ----------------------------------
@@ -429,8 +400,6 @@ bool fetchAssignedTable(int &tableNumberOut) {
 }
 
 bool connectSocket() {
-    // Re-check on every (re)connect attempt, not just at boot, so a table
-    // reassignment (PUT /device/{n} elsewhere) is picked up without a reflash.
     ws.close();
     int fetched;
     if (fetchAssignedTable(fetched)) {
@@ -441,9 +410,6 @@ bool connectSocket() {
     } else {
         Serial.println("[device] lookup failed, using last known table");
     }
-
-    // serverURL includes the "http://" scheme (needed for HTTPClient calls
-    // elsewhere); strip it here since we're building a ws:// URL instead.
     String host = serverURL;
     host.replace("http://", "");
 
@@ -539,15 +505,6 @@ void onWsMessage(WebsocketsMessage message) {
 }
 
 // -------------------------------- capture -----------------------------------
-// Minimal and non-blocking, as an ISR must be: just latch the new state and
-// the exact time it happened. All the real work (debounce, startCapture,
-// stopCapture, any I2C/Serial/WS calls) stays in loop(), which is not
-// interrupt-safe to call from here.
-void IRAM_ATTR handleButtonInterrupt() {
-    buttonIsrState = (digitalRead(BUTTON_PIN) == LOW);
-    buttonIsrTime = millis();
-    buttonIsrPending = true;
-}
 
 void startCapture() {
     if (!wsConnected) return;
@@ -602,10 +559,6 @@ void pumpAudio() {
 }
 
 // -------------------------------- status LED --------------------------------
-#if __has_include(<Adafruit_NeoPixel.h>)
-#include <Adafruit_NeoPixel.h>
-static Adafruit_NeoPixel pixels(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
-static bool pixelsStarted = false;
 
 void setStatus(uint8_t r, uint8_t g, uint8_t b) {
     if (!pixelsStarted) {
@@ -615,8 +568,4 @@ void setStatus(uint8_t r, uint8_t g, uint8_t b) {
     pixels.setPixelColor(0, pixels.Color(r, g, b));
     pixels.show();
 }
-#else
-void setStatus(uint8_t r, uint8_t g, uint8_t b) {
-    (void)r; (void)g; (void)b;  // no LED library installed; status is serial-only
-}
-#endif
+
